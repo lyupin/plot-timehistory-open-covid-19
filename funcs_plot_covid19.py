@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from scipy import interpolate
 from datetime import timedelta, date
+import os
 
 # Set the font
 mpl.rcParams['font.family'] = 'sans-serif'
@@ -24,6 +25,8 @@ key_confirmedCount = 'Confirmed'
 key_deadCount = 'Deaths'
 
 label_latestValue = 'latest'
+
+cwd = os.getcwd()
 
 class RegionData:
     name = ''
@@ -48,14 +51,22 @@ class RegionData:
     def __init__(self, name, nameParent = None):
         self.name = name
         self.nameParent = nameParent
-        self.dfRegion = pd.DataFrame(columns = [key_date, key_country, \
+        self.dfRegion = pd.DataFrame(columns = [key_date, key_region, \
             key_confirmedCount, key_deadCount, key_confirmedIncrement, \
             key_deadIncrement])
         self.nCol = len(self.dfRegion.columns)
         return
 
+    # Set the accumulated counts of the confirmed cases and dead cases to the object
     def SetAccumulatives(self, sr_dates, sr_confirmedCounts = None, sr_deadCounts = None, \
         sr_curedCounts = None, debug = False):
+
+        if sr_confirmedCounts is not None:
+            sr_confirmedCounts.fillna(0, inplace = True)
+
+        if sr_deadCounts is not None:
+            sr_deadCounts.fillna(0, inplace = True)
+
         dateFormat = '%Y-%m-%d'
         dateMin = pd.to_datetime(sr_dates, format = dateFormat).min()
         dateMax = pd.to_datetime(sr_dates, format = dateFormat).max()
@@ -81,6 +92,7 @@ class RegionData:
             print(self.dfRegion)
         return
 
+    # Calculate daily increments
     def CalcIncrements(self):
         colConfirmedCount = self.dfRegion.columns.get_loc(key_confirmedCount)
         colConfirmedInc = self.dfRegion.columns.get_loc(key_confirmedIncrement)
@@ -95,6 +107,7 @@ class RegionData:
                 self.dfRegion.iloc[iDate, colDeadCount] - self.dfRegion.iloc[iDate-1, colDeadCount]
         return
 
+    # (Not used) Set daily increments from data source.
     def SetIncrements(self, sr_dates, sr_confirmedIncrements, sr_curedIncrements, sr_deadIncrements, debug = False):
         if debug:
             print('In SetIncrements:')
@@ -122,8 +135,9 @@ class RegionData:
             self.dfRegion.loc[dateTmp, key_deadIncrement] = int(sr_deadIncrements.iloc[iDate])
         return
 
+    # Complete some properties of the dataframe
     def CheckOut(self, debug = False):
-        self.dfRegion[key_country] = self.name
+        self.dfRegion[key_region] = self.name
         self.nRow = len(self.dfRegion.index)
         self.nCol = len(self.dfRegion.columns)
         self.dfRegion.index = np.arange(self.nRow)
@@ -132,9 +146,14 @@ class RegionData:
             print(self.dfRegion)
         return
 
+
 def get_unique_record_on_each_day(df_in, strategy = 'latest', debug = False):
     '''
-    strategy determines how to deal with multiple records in a single day. 
+    Some databases provide a unique record in a region for each day. That's good.
+    Some databases provide multiple records on the same day for a region,
+    which is this function designed for.
+    By default, this function select the latest record on each day.
+    `strategy` determines how to deal with multiple records in a single day. 
     It can be 'sum' or 'latest'(default).
     '''
     dates = df_in[key_date]
@@ -179,9 +198,17 @@ def get_unique_record_on_each_day(df_in, strategy = 'latest', debug = False):
 
     return dfNewTmp
 
-def extract_by_area(df_in, areaName, debug = False):
-    df_tmp2_1 = df_in[df_in[key_country] == areaName]
-    df_tmp2 = df_tmp2_1[df_tmp2_1[key_region].isnull()].copy() 
+def extract_by_area(df_in, areaName, is_region = False, debug = False):
+    '''
+    Extract data of a certain area by the name of area.
+    '''
+    if is_region:
+        df_tmp2 = df_in[df_in[key_region] == areaName].copy()
+    else:
+        # is country.
+        df_tmp2_1 = df_in[df_in[key_country] == areaName]
+        df_tmp2 = df_tmp2_1[df_tmp2_1[key_region].isnull()].copy() 
+
     if debug:
         print('In extracted_by_area, pos 1:')
         print(df_tmp2)
@@ -199,12 +226,18 @@ def extract_by_area(df_in, areaName, debug = False):
     return regionData.dfRegion
 
 def find_start_date(df_in, startNum = 10):
+    '''
+    Find the first date on which the confirmed count reaches `startNum`.
+    '''
     dfTmp = df_in[df_in[key_confirmedCount] >= startNum]
     datesTmp = pd.to_datetime(dfTmp[key_date]).sort_values()
     startDate = datesTmp.iloc[0]
     return startDate
 
-def plot_region_timehistory(df_in, areaNames, savefig = True, show = False, debug = False):
+def plot_region_timehistory(df_in, areaNames, dir_export = None, savefig = True, show = False, debug = False):
+    '''
+    Plot the time histories and save figures to disk.
+    '''
     # matplotlib date format object
     dateFormat = '%Y-%m-%d'
     hfmt = mpl.dates.DateFormatter(dateFormat)    
@@ -220,7 +253,7 @@ def plot_region_timehistory(df_in, areaNames, savefig = True, show = False, debu
         fig, ax = plt.subplots()
         for iArea in range(nArea):
             areaName = areaNames[iArea]
-            df_tmp = df_in[df_in[key_country] == areaName]
+            df_tmp = df_in[df_in[key_region] == areaName]
             xTmp = pd.to_datetime(df_tmp[key_date], format = dateFormat)
             yTmp = df_tmp[columnNames[iCol]]
             ax.plot(xTmp, yTmp, '.-', \
@@ -243,7 +276,10 @@ def plot_region_timehistory(df_in, areaNames, savefig = True, show = False, debu
         fig.autofmt_xdate()
         
         if savefig:
-            plt.savefig(columnNames[iCol]+'.png', dpi = 300)
+            fn_tmp = columnNames[iCol]+'.png'
+            if dir_export is not None:
+                fn_tmp = os.path.join(dir_export, fn_tmp)
+            plt.savefig(fn_tmp, dpi = 300)
         if show:
             plt.show()
         plt.close()
@@ -252,7 +288,7 @@ def plot_region_timehistory(df_in, areaNames, savefig = True, show = False, debu
     for iCol in range(nColumnName):
         for iArea in range(nArea):
             areaName = areaNames[iArea]
-            df_tmp = df_in[df_in[key_country] == areaName]
+            df_tmp = df_in[df_in[key_region] == areaName]
             fig, ax = plt.subplots()
             xTmp = pd.to_datetime(df_tmp[key_date], format = dateFormat)
             yTmp = df_tmp[columnNames[iCol]]
@@ -295,26 +331,37 @@ def plot_region_timehistory(df_in, areaNames, savefig = True, show = False, debu
             fig.autofmt_xdate()
         
             if savefig:
-                plt.savefig(columnNames[iCol]+'_'+areaName+'.png', dpi = 300)
+                fn_tmp = columnNames[iCol]+'_'+areaName+'.png'
+                if dir_export is not None:
+                    fn_tmp = os.path.join(dir_export, fn_tmp)
+                plt.savefig(fn_tmp, dpi = 300)
             if show:
                 plt.show()
             plt.close()
 
     return
 
-def plot_covid19_timehistory(fn_csv, areaNames, debug = False):
+def plot_covid19_timehistory(fn_csv, areaNames, dir_export = 'export', \
+    is_region = False, debug = False):
+    '''
+    Interface for external usage.
+    '''
     df_orig = pd.read_csv(fn_csv)
     #print(df_orig)
     nArea = len(areaNames)
 
+    if (not os.path.exists(dir_export)):
+        os.mkdir(dir_export)
+
     datasets = []
     for iArea in range(nArea):
-        df_tmp1 = extract_by_area(df_orig, areaNames[iArea], debug = debug)
+        df_tmp1 = extract_by_area(df_orig, areaNames[iArea], is_region = is_region, debug = debug)
         datasets.append(df_tmp1)
     df_out = pd.concat(datasets)
-    df_out.to_csv('extracted_data.csv', encoding = 'utf-8')
 
-    plot_region_timehistory(df_out, areaNames, debug = debug)
+    df_out.to_csv(os.path.join(dir_export, 'extracted_data.csv'), encoding = 'utf-8')
+
+    plot_region_timehistory(df_out, areaNames, dir_export = dir_export, debug = debug)
     return
 
 if __name__ == '__main__':

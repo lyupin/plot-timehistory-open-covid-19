@@ -6,6 +6,10 @@ from scipy import interpolate
 from datetime import timedelta, date
 import os
 
+# For downloading file
+import requests
+from tqdm import tqdm
+
 # Set the font
 mpl.rcParams['font.family'] = 'sans-serif'
 mpl.rcParams['font.sans-serif'] = ['Microsoft YaHei'] # 'Arial', 'SimHei'
@@ -146,6 +150,30 @@ class RegionData:
             print(self.dfRegion)
         return
 
+def download_file_old(url_in, fn_out, debug = True):
+    r = requests.get(url_in, stream = True)   
+    with open(fn_out,"wb") as fn_down:
+        if debug:
+            i_chunk = 0
+        for chunk in r.iter_content(chunk_size=1024):     
+            # writing one chunk at a time to the file 
+            if chunk:
+                if debug:
+                    i_chunk += 1
+                    if i_chunk%100 == 0:
+                        print('Downloading ({:d} kB).'.format(i_chunk))
+                fn_down.write(chunk) 
+    return
+
+def download_file(url_in, fn_out, chunk_size = 512):
+    req = requests.get(url_in, stream = True)  
+    total_size = int(req.headers['content-length']) 
+    with open(fn_out,"wb") as fn_down:
+        for chunk in tqdm(iterable = req.iter_content(chunk_size = chunk_size),\
+            total = total_size / chunk_size, unit='KB'):
+            fn_down.write(chunk)
+    print('File downloaded: {:s}'.format(fn_out))
+    return
 
 def get_unique_record_on_each_day(df_in, strategy = 'latest', debug = False):
     '''
@@ -242,8 +270,8 @@ def plot_region_timehistory(df_in, areaNames, dir_export = None, savefig = True,
     dateFormat = '%Y-%m-%d'
     hfmt = mpl.dates.DateFormatter(dateFormat)    
 
-    columnNames = [key_confirmedCount, key_confirmedIncrement]
-    columnDisplayStr = ['Confirmed', 'Daily Increment of Confirmed']
+    columnNames = [key_confirmedCount, key_confirmedIncrement, key_deadCount, key_deadIncrement]
+    columnDisplayStr = ['Confirmed', 'Daily Increment of Confirmed', 'Deaths', 'Daily Increment of Deaths']
     nColumnName = len(columnNames)
 
     nArea = len(areaNames)
@@ -280,6 +308,7 @@ def plot_region_timehistory(df_in, areaNames, dir_export = None, savefig = True,
             if dir_export is not None:
                 fn_tmp = os.path.join(dir_export, fn_tmp)
             plt.savefig(fn_tmp, dpi = 300)
+            print('Figure saved: {:s}'.format(fn_tmp))
         if show:
             plt.show()
         plt.close()
@@ -335,6 +364,7 @@ def plot_region_timehistory(df_in, areaNames, dir_export = None, savefig = True,
                 if dir_export is not None:
                     fn_tmp = os.path.join(dir_export, fn_tmp)
                 plt.savefig(fn_tmp, dpi = 300)
+                print('Figure saved: {:s}'.format(fn_tmp))
             if show:
                 plt.show()
             plt.close()
